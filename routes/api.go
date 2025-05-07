@@ -1,8 +1,7 @@
-package router
+package routes
 
 import (
     "github.com/gin-gonic/gin"
-    "github.com/ronygcgarcia/go_base_project/controllers"
 )
 
 func SetupRouter() *gin.Engine {
@@ -10,8 +9,8 @@ func SetupRouter() *gin.Engine {
 
     api := r.Group("/api")
     {
-        api.GET("/users", controllers.GetAllUsers)
-        api.POST("/users", controllers.CreateUser)
+        // RegisterAuthRoutes(api.Group("/auth"))
+        RegisterUserRoutes(api.Group("/users"))
     }
 
     return r
