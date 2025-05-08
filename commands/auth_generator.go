@@ -115,20 +115,13 @@ func RegisterClientPasswordAuth(r *gin.Engine) {
 // generateAuthController creates a basic auth controller file with login logic.
 func generateAuthController(flow string) error {
 	controllerFile := "controllers/auth.controller.go"
-	if _, err := os.Stat(controllerFile); err == nil {
-		fmt.Println("ℹ️ Auth controller already exists.")
-		return nil
-	}
+	methodNeeded := ""
+	methodCode := ""
 
-	content := `package controllers
-
-import (
-	"net/http"
-	"github.com/gin-gonic/gin"
-	"github.com/ronygcgarcia/go_base_project/auth"
-	"github.com/ronygcgarcia/go_base_project/config"
-	"github.com/ronygcgarcia/go_base_project/models"
-)
+	switch flow {
+	case "client_password":
+		methodNeeded = "func LoginUser"
+		methodCode = `
 
 func LoginUser(c *gin.Context) {
 	var body struct {
@@ -137,31 +130,102 @@ func LoginUser(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		c.JSON(400, gin.H{"error": "Invalid request"})
 		return
 	}
 
 	var user models.User
 	if err := config.DB.Where("email = ?", body.Email).First(&user).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		c.JSON(401, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
 	if !user.CheckPassword(body.Password) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Incorrect password"})
+		c.JSON(401, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
 	token, err := auth.IssueUserToken(user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token error"})
+		c.JSON(500, gin.H{"error": "Token generation failed"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"access_token": token, "token_type": "Bearer"})
+	c.JSON(200, gin.H{"access_token": token, "token_type": "Bearer"})
 }`
 
-	return os.WriteFile(controllerFile, []byte(content), 0644)
+	case "client_credentials":
+		methodNeeded = "func AuthClientCredentials"
+		methodCode = `
+
+func AuthClientCredentials(c *gin.Context) {
+	var body struct {
+		ClientID     string ` + "`json:\"client_id\"`" + `
+		ClientSecret string ` + "`json:\"client_secret\"`" + `
+	}
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	var client models.OAuthClient
+	if err := config.DB.Where("client_id = ?", body.ClientID).First(&client).Error; err != nil {
+		c.JSON(401, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	if !client.CheckSecret(body.ClientSecret) {
+		c.JSON(401, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	token, err := auth.IssueClientToken(client.ClientID)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Token generation failed"})
+		return
+	}
+
+	c.JSON(200, gin.H{"access_token": token, "token_type": "Bearer"})
+}`
+	default:
+		return fmt.Errorf("unknown auth flow: %s", flow)
+	}
+
+	// If file doesn't exist, create it
+	if _, err := os.Stat(controllerFile); os.IsNotExist(err) {
+		header := `package controllers
+
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/ronygcgarcia/go_base_project/auth"
+	"github.com/ronygcgarcia/go_base_project/config"
+	"github.com/ronygcgarcia/go_base_project/models"
+)` + methodCode
+		return os.WriteFile(controllerFile, []byte(header), 0644)
+	}
+
+	// If file exists, append method if not present
+	source, err := os.ReadFile(controllerFile)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(string(source), methodNeeded) {
+		fmt.Println("ℹ️ Controller already has:", methodNeeded)
+		return nil
+	}
+
+	f, err := os.OpenFile(controllerFile, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.WriteString(methodCode); err != nil {
+		return err
+	}
+
+	fmt.Println("✅ Added method to controller:", methodNeeded)
+	return nil
 }
 
 // generateAuthModel creates the user or oauth_client model if needed.
