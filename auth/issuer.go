@@ -47,7 +47,7 @@ func IssueClientToken(clientID string) (string, error) {
 	return token.SignedString(key)
 }
 
-func IssueUserToken(userID uint, email string, name string) (string, error) {
+func IssueUserToken(userID uint) (string, error) {
 	key, err := loadPrivateKey()
 	if err != nil {
 		return "", err
@@ -55,8 +55,6 @@ func IssueUserToken(userID uint, email string, name string) (string, error) {
 
 	claims := jwt.MapClaims{
 		"sub":   fmt.Sprintf("user:%d", userID),
-		"email": email,
-		"name":  name,
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(time.Hour * 1).Unix(),
 		"scope": "user",
