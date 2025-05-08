@@ -73,6 +73,14 @@ func ActivateAuthFlow(flow string) error {
 		return fmt.Errorf("failed to create migration for auth type: %w", err)
 	}
 
+	// Generate controller and model
+	if err := generateAuthController(flow); err != nil {
+		return fmt.Errorf("failed to create controller: %w", err)
+	}
+	if err := generateAuthModel(flow); err != nil {
+		return fmt.Errorf("failed to create model: %w", err)
+	}
+
 	return nil
 }
 
@@ -149,6 +157,211 @@ func RegisterClientPasswordAuth(r *gin.Engine) {
 		c.JSON(200, gin.H{"access_token": token, "token_type": "Bearer"})
 	})
 }`
+}
+
+// generateAuthController creates a basic auth controller file with login logic.
+func generateAuthController(flow string) error {
+	controllerFile := "controllers/auth.controller.go"
+	if _, err := os.Stat(controllerFile); err == nil {
+		fmt.Println("ℹ️ Auth controller already exists.")
+		return nil
+	}
+
+	content := `package controllers
+
+import (
+	"net/http"
+	"github.com/gin-gonic/gin"
+	"github.com/ronygcgarcia/go_base_project/auth"
+	"github.com/ronygcgarcia/go_base_project/config"
+	"github.com/ronygcgarcia/go_base_project/models"
+)
+
+func LoginUser(c *gin.Context) {
+	var body struct {
+		Email    string ` + "`json:\"email\"`" + `
+		Password string ` + "`json:\"password\"`" + `
+	}
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	var user models.User
+	if err := config.DB.Where("email = ?", body.Email).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		return
+	}
+
+	if !user.CheckPassword(body.Password) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Incorrect password"})
+		return
+	}
+
+	token, err := auth.IssueUserToken(user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"access_token": token, "token_type": "Bearer"})
+}`
+
+	return os.WriteFile(controllerFile, []byte(content), 0644)
+}
+
+// generateAuthModel creates the user or oauth_client model if needed.
+func generateAuthModel(flow string) error {
+	var modelFile, modelContent string
+
+	switch flow {
+	case "client_password":
+		modelFile = "models/user.go"
+		if _, err := os.Stat(modelFile); err == nil {
+			source, err := os.ReadFile(modelFile)
+			if err != nil {
+				return err
+			}
+			if !strings.Contains(string(source), "CheckPassword") ||
+				!strings.Contains(string(source), "Email") ||
+				!strings.Contains(string(source), "Password") ||
+				!strings.Contains(string(source), "Name") ||
+				!strings.Contains(string(source), "CreatedAt") ||
+				!strings.Contains(string(source), "UpdatedAt") {
+
+				appendContent := `
+
+// Ensure full User model compliance for auth
+import "time"
+
+type User struct {
+	ID        uint      ` + "`gorm:\"primaryKey\"`" + `
+	Name      string
+	Email     string    ` + "`gorm:\"uniqueIndex\"`" + `
+	Password  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (User) TableName() string {
+	return "users"
+}
+
+func (u *User) CheckPassword(password string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)) == nil
+}`
+				f, err := os.OpenFile(modelFile, os.O_APPEND|os.O_WRONLY, 0600)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				if _, err = f.WriteString(appendContent); err != nil {
+					return err
+				}
+				fmt.Println("✅ Added CheckPassword method and fields to:", modelFile)
+			} else {
+				fmt.Println("ℹ️ Model already has required fields:", modelFile)
+			}
+			return nil
+		}
+		modelContent = `package models
+
+import (
+	"golang.org/x/crypto/bcrypt"
+	"time"
+)
+
+type User struct {
+	ID        uint      ` + "`gorm:\"primaryKey\"`" + `
+	Name      string
+	Email     string    ` + "`gorm:\"uniqueIndex\"`" + `
+	Password  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (User) TableName() string {
+	return "users"
+}
+
+func (u *User) CheckPassword(password string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)) == nil
+}`
+	case "client_credentials":
+		modelFile = "models/oauth_client.go"
+		if _, err := os.Stat(modelFile); err == nil {
+			source, err := os.ReadFile(modelFile)
+			if err != nil {
+				return err
+			}
+			if !strings.Contains(string(source), "CheckSecret") ||
+				!strings.Contains(string(source), "ClientID") ||
+				!strings.Contains(string(source), "ClientSecret") ||
+				!strings.Contains(string(source), "Name") ||
+				!strings.Contains(string(source), "CreatedAt") ||
+				!strings.Contains(string(source), "UpdatedAt") {
+
+				appendContent := `
+
+// Ensure full OAuthClient model compliance for client auth
+import "time"
+
+type OAuthClient struct {
+	ID           uint      ` + "`gorm:\"primaryKey\"`" + `
+	ClientID     string    ` + "`gorm:\"uniqueIndex\"`" + `
+	ClientSecret string
+	Name         string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+func (OAuthClient) TableName() string {
+	return "oauth_clients"
+}
+
+func (c *OAuthClient) CheckSecret(secret string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(c.ClientSecret), []byte(secret)) == nil
+}`
+				f, err := os.OpenFile(modelFile, os.O_APPEND|os.O_WRONLY, 0600)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				if _, err = f.WriteString(appendContent); err != nil {
+					return err
+				}
+				fmt.Println("✅ Added CheckSecret method and fields to:", modelFile)
+			} else {
+				fmt.Println("ℹ️ Model already has required fields:", modelFile)
+			}
+			return nil
+		}
+		modelContent = `package models
+
+import (
+	"golang.org/x/crypto/bcrypt"
+	"time"
+)
+
+type OAuthClient struct {
+	ID           uint      ` + "`gorm:\"primaryKey\"`" + `
+	ClientID     string    ` + "`gorm:\"uniqueIndex\"`" + `
+	ClientSecret string
+	Name         string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+func (OAuthClient) TableName() string {
+	return "oauth_clients"
+}
+
+func (c *OAuthClient) CheckSecret(secret string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(c.ClientSecret), []byte(secret)) == nil
+}`
+	}
+	return os.WriteFile(modelFile, []byte(modelContent), 0644)
 }
 
 func createAuthMigration(flow string) error {

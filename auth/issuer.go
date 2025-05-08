@@ -46,3 +46,22 @@ func IssueClientToken(clientID string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	return token.SignedString(key)
 }
+
+func IssueUserToken(userID uint, email string, name string) (string, error) {
+	key, err := loadPrivateKey()
+	if err != nil {
+		return "", err
+	}
+
+	claims := jwt.MapClaims{
+		"sub":   fmt.Sprintf("user:%d", userID),
+		"email": email,
+		"name":  name,
+		"iat":   time.Now().Unix(),
+		"exp":   time.Now().Add(time.Hour * 1).Unix(),
+		"scope": "user",
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	return token.SignedString(key)
+}
