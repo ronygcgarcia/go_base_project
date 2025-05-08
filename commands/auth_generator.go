@@ -16,6 +16,8 @@ func ActivateAuthFlow(flow string) error {
 		routeFile = "routes/auth_client_credentials.go"
 		registerFunc = "RegisterClientCredentialsAuth(r)"
 		routeTemplate = getClientCredentialsTemplate()
+		createOauthClientCommand()
+		addCreateOauthClientCommandCli()
 	case "client_password":
 		routeFile = "routes/auth_client_password.go"
 		registerFunc = "RegisterClientPasswordAuth(r)"
@@ -80,8 +82,6 @@ func ActivateAuthFlow(flow string) error {
 		return fmt.Errorf("failed to create model: %w", err)
 	}
 
-	createOauthClientCommand()
-	addCreateOauthClientCommandCli()
 	if err := addCreateOauthClientCommandCli(); err != nil {
 		return fmt.Errorf("failed to add CLI command: %w", err)
 	}
