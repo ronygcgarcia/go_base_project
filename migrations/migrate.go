@@ -30,13 +30,13 @@ func Run(db *gorm.DB) error {
     fmt.Println("Executing migrations...")
     for _, m := range All() {
         if hasMigration(db, m.Name()) {
-            fmt.Printf("↷ %s ya fue aplicada, saltando\n", m.Name())
+            fmt.Printf("↷ %s Already applied, skipping\n", m.Name())
             continue
         }
 
         fmt.Printf("→ %s\n", m.Name())
         if err := m.Up(db); err != nil {
-            return fmt.Errorf("error en %s: %w", m.Name(), err)
+            return fmt.Errorf("Error while executing %s: %w", m.Name(), err)
         }
 
         saveMigration(db, m.Name())
@@ -48,17 +48,17 @@ func Run(db *gorm.DB) error {
 func Rollback(db *gorm.DB) error {
     ensureSchemaTable(db)
 
-    fmt.Println("Revirtiendo migraciones...")
+    fmt.Println("Reverting migrations...")
     for i := len(All()) - 1; i >= 0; i-- {
         m := All()[i]
         if !hasMigration(db, m.Name()) {
-            fmt.Printf("⤷ %s no ha sido aplicada, saltando\n", m.Name())
+            fmt.Printf("⤷ %s has not been applied, skipping\n", m.Name())
             continue
         }
 
-        fmt.Printf("↩ %s\n", m.Name())
+        fmt.Printf("↩ Rolling back %s...\n", m.Name())
         if err := m.Down(db); err != nil {
-            return fmt.Errorf("error en rollback %s: %w", m.Name(), err)
+            return fmt.Errorf("rollback failed for %s: %w", m.Name(), err)
         }
 
         removeMigration(db, m.Name())
