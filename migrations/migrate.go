@@ -27,7 +27,7 @@ func removeMigration(db *gorm.DB, name string) {
 func Run(db *gorm.DB) error {
     ensureSchemaTable(db)
 
-    fmt.Println("Ejecutando migraciones...")
+    fmt.Println("Executing migrations...")
     for _, m := range All() {
         if hasMigration(db, m.Name()) {
             fmt.Printf("↷ %s ya fue aplicada, saltando\n", m.Name())
