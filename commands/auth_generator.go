@@ -89,35 +89,12 @@ func getClientCredentialsTemplate() string {
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/ronygcgarcia/go_base_project/auth"
+	"github.com/ronygcgarcia/go_base_project/controllers"
 )
 
 func RegisterClientCredentialsAuth(r *gin.Engine) {
 	authGroup := r.Group("/auth")
-	authGroup.POST("/token", func(c *gin.Context) {
-		var body struct {
-			ClientID     string ` + "`json:\"client_id\"`" + `
-			ClientSecret string ` + "`json:\"client_secret\"`" + `
-		}
-
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid payload"})
-			return
-		}
-
-		if body.ClientID != "my-client" || body.ClientSecret != "my-secret" {
-			c.JSON(401, gin.H{"error": "Invalid client credentials"})
-			return
-		}
-
-		token, err := auth.IssueClientToken(body.ClientID)
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to generate token"})
-			return
-		}
-
-		c.JSON(200, gin.H{"access_token": token, "token_type": "Bearer"})
-	})
+	authGroup.POST("/token", controllers.AuthClientCredentials)
 }`
 }
 
@@ -126,36 +103,12 @@ func getClientPasswordTemplate() string {
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/ronygcgarcia/go_base_project/auth"
+	"github.com/ronygcgarcia/go_base_project/controllers"
 )
 
 func RegisterClientPasswordAuth(r *gin.Engine) {
 	authGroup := r.Group("/auth")
-	authGroup.POST("/login", func(c *gin.Context) {
-		var body struct {
-			Email    string ` + "`json:\"email\"`" + `
-			Password string ` + "`json:\"password\"`" + `
-		}
-
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid payload"})
-			return
-		}
-
-		// TODO: validate user credentials against the database
-		if body.Email != "demo@example.com" || body.Password != "password123" {
-			c.JSON(401, gin.H{"error": "Invalid credentials"})
-			return
-		}
-
-		token, err := auth.IssueClientToken(body.Email)
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to generate token"})
-			return
-		}
-
-		c.JSON(200, gin.H{"access_token": token, "token_type": "Bearer"})
-	})
+	authGroup.POST("/login", controllers.LoginUser)
 }`
 }
 
