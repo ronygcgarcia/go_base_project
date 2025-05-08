@@ -1,4 +1,4 @@
-package migrations
+package config
 
 import (
 	"fmt"
@@ -65,5 +65,34 @@ func Rollback(db *gorm.DB) error {
 		removeMigration(db, m.Name())
 	}
 
+	return nil
+}
+
+func RollbackOne(db *gorm.DB) error {
+	ensureSchemaTable(db)
+
+	var last SchemaMigration
+	result := db.Order("applied_at desc").Limit(1).Find(&last)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		fmt.Println("⤷ No migrations have been applied.")
+		return nil
+	}
+
+	for _, m := range All() {
+		if m.Name() == last.Name {
+			fmt.Printf("↩ Rolling back migration: %s\n", m.Name())
+			if err := m.Down(db); err != nil {
+				return fmt.Errorf("error rolling back migration %s: %w", m.Name(), err)
+			}
+			db.Delete(&last)
+			fmt.Println("✅ Migration rolled back.")
+			return nil
+		}
+	}
+
+	fmt.Printf("⚠️ Migration %s not found in registry.\n", last.Name)
 	return nil
 }

@@ -1,3 +1,5 @@
+# Makefile for managing the Go project
+
 run:
 	go run main.go
 
@@ -7,5 +9,20 @@ migrate:
 rollback:
 	go run main.go rollback
 
-make-migration:
+rollback-step:
+	go run main.go rollback:step
+
+migration:
 	go run main.go make:migration $(name)
+
+seed:
+	go run main.go seed
+
+seed-rollback:
+	go run main.go seed:rollback
+
+seed-rollback-step:
+	go run main.go seed:rollback:step
+
+seeder:
+	go run main.go make:seeder $(name)

@@ -1,4 +1,4 @@
-package migrations
+package config
 
 import "gorm.io/gorm"
 
