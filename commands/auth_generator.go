@@ -443,6 +443,8 @@ type oauthClientModel struct {
 	Name         string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+	ExpireAt     *time.Time
+	Revoked      bool
 }
 
 func (oauthClientModel) TableName() string {
