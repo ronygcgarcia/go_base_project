@@ -97,6 +97,18 @@ func HandleCLI() bool {
 		}
 		fmt.Println("✅ Last seeder rolled back.")
 		return true
+	case "make:activate-auth":
+		if len(os.Args) < 3 || !strings.HasPrefix(os.Args[2], "type=") {
+			fmt.Println("❌ Missing parameter: type=client_credentials")
+			os.Exit(1)
+		}
+		authType := strings.TrimPrefix(os.Args[2], "type=")
+		if err := ActivateAuthFlow(authType); err != nil {
+			fmt.Println("❌ Error activating auth:", err)
+			os.Exit(1)
+		}
+		fmt.Println("✅ Auth flow activated successfully.")
+		return true
 
 	}
 

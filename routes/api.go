@@ -9,7 +9,6 @@ func SetupRouter() *gin.Engine {
 
 	api := r.Group("/api")
 	{
-		// RegisterAuthRoutes(api.Group("/auth"))
 		RegisterUserRoutes(api.Group("/users"))
 	}
 

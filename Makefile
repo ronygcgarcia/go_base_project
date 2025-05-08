@@ -26,3 +26,7 @@ seed-rollback-step:
 
 seeder:
 	go run main.go make:seeder $(name)
+
+activate-auth:
+	go run main.go make:activate-auth type=$(type)
+
