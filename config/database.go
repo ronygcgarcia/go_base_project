@@ -13,10 +13,10 @@ import (
 var DB *gorm.DB
 
 func ConnectDatabase() {
-	// Carga las variables de entorno desde .env (solo en dev/local)
+	// Load environment variables from .env (only in dev/local)
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("Advertencia: No se pudo cargar .env, usando variables del sistema")
+		log.Println("Warning: .env file not found, using system environment variables")
 	}
 
 	host := os.Getenv("DB_HOST")
@@ -31,10 +31,10 @@ func ConnectDatabase() {
 
 	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatal("Error al conectar la base de datos:", err)
+		log.Fatal("Failed to connect to the database:", err)
 	}
 
-	// Migración automática (puedes modularizar esto después)
+	// Auto migration disabled: handled manually via migrations system
 	// database.AutoMigrate(&models.User{})
 
 	DB = database
