@@ -80,6 +80,13 @@ func ActivateAuthFlow(flow string) error {
 		return fmt.Errorf("failed to create model: %w", err)
 	}
 
+	createOauthClientCommand()
+	addCreateOauthClientCommandCli()
+	if err := addCreateOauthClientCommandCli(); err != nil {
+		return fmt.Errorf("failed to add CLI command: %w", err)
+	}
+	fmt.Println("✅ Auth flow setup completed successfully.")
+
 	return nil
 }
 
@@ -117,6 +124,28 @@ func generateAuthController(flow string) error {
 	controllerFile := "controllers/auth.controller.go"
 	methodNeeded := ""
 	methodCode := ""
+
+	// Crea el archivo si no existe
+	if _, err := os.Stat(controllerFile); os.IsNotExist(err) {
+		header := `package controllers
+
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/ronygcgarcia/go_base_project/auth"
+	"github.com/ronygcgarcia/go_base_project/config"
+	"github.com/ronygcgarcia/go_base_project/models"
+	"time"
+	"os"
+	"strconv"
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
+)
+`
+		if err := os.WriteFile(controllerFile, []byte(header), 0644); err != nil {
+			return fmt.Errorf("failed to create controller file: %w", err)
+		}
+		fmt.Println("✅ Created new controller file:", controllerFile)
+	}
 
 	switch flow {
 	case "client_password":
@@ -180,7 +209,7 @@ func AuthClientCredentials(c *gin.Context) {
 		return
 	}
 
-	accessToken, err := auth.IssueClientToken(client.ClientID)
+	accessToken, err := auth.IssueClientToken(client.ClientID, getAccessTokenTTL())
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to generate access token"})
 		return
@@ -200,13 +229,9 @@ func AuthClientCredentials(c *gin.Context) {
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
 		"token_type":    "Bearer",
-		"expires_in":    3600,
+		"expires_in":    int(getAccessTokenTTL().Seconds()),
 	})
-}`
-
-		// Add refresh token endpoint
-		refreshFunc := "func RefreshAccessToken"
-		refreshCode := `
+}
 
 func RefreshAccessToken(c *gin.Context) {
 	var body struct {
@@ -235,7 +260,7 @@ func RefreshAccessToken(c *gin.Context) {
 	var client models.OAuthClient
 	config.DB.First(&client, token.ClientID)
 
-	newAccessToken, err := auth.IssueClientToken(client.ClientID)
+	newAccessToken, err := auth.IssueClientToken(client.ClientID, getAccessTokenTTL())
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to generate new access token"})
 		return
@@ -255,71 +280,64 @@ func RefreshAccessToken(c *gin.Context) {
 		"access_token":  newAccessToken,
 		"refresh_token": newRefresh,
 		"token_type":    "Bearer",
-		"expires_in":    3600,
+		"expires_in":    int(getAccessTokenTTL().Seconds()),
 	})
-}
+}`
+	default:
+		return fmt.Errorf("unknown auth flow: %s", flow)
+	}
+
+	// Añadir método si no está
+	source, err := os.ReadFile(controllerFile)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(string(source), methodNeeded) {
+		f, err := os.OpenFile(controllerFile, os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if _, err := f.WriteString(methodCode); err != nil {
+			return err
+		}
+		fmt.Println("✅ Added method to controller:", methodNeeded)
+	} else {
+		fmt.Println("ℹ️ Controller already has:", methodNeeded)
+	}
+
+	// Añadir helpers TTL si no existen
+	if !strings.Contains(string(source), "func getAccessTokenTTL") {
+		helpers := `
 
 func getRefreshTTL() time.Duration {
 	val := os.Getenv("REFRESH_TOKEN_EXPIRATION_MINUTES")
 	if min, err := strconv.Atoi(val); err == nil && min > 0 {
 		return time.Duration(min) * time.Minute
 	}
-	return time.Hour * 24 * 7
+	return 7 * 24 * time.Hour
+}
+
+func getAccessTokenTTL() time.Duration {
+	val := os.Getenv("TOKEN_EXPIRATION_MINUTES")
+	if min, err := strconv.Atoi(val); err == nil && min > 0 {
+		return time.Duration(min) * time.Minute
+	}
+	return time.Hour
 }`
-
-		// Agregar RefreshAccessToken si no existe
-		source, err := os.ReadFile(controllerFile)
-		if err == nil && !strings.Contains(string(source), refreshFunc) {
-			f, err := os.OpenFile(controllerFile, os.O_APPEND|os.O_WRONLY, 0600)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			if _, err := f.WriteString(refreshCode); err != nil {
-				return err
-			}
-			fmt.Println("✅ Added refresh function to controller.")
+		f, err := os.OpenFile(controllerFile, os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			return err
 		}
+		defer f.Close()
+		if _, err := f.WriteString(helpers); err != nil {
+			return err
+		}
+		fmt.Println("✅ Added token TTL helpers to controller")
+	} else {
+		fmt.Println("ℹ️ TTL helpers already exist in controller")
 	}
 
-	// Crear archivo si no existe
-	if _, err := os.Stat(controllerFile); os.IsNotExist(err) {
-		header := `package controllers
-
-import (
-	"github.com/gin-gonic/gin"
-	"github.com/ronygcgarcia/go_base_project/auth"
-	"github.com/ronygcgarcia/go_base_project/config"
-	"github.com/ronygcgarcia/go_base_project/models"
-	"time"
-	"os"
-	"strconv"
-	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
-)` + methodCode
-		return os.WriteFile(controllerFile, []byte(header), 0644)
-	}
-
-	// Append si no existe
-	source, err := os.ReadFile(controllerFile)
-	if err != nil {
-		return err
-	}
-	if strings.Contains(string(source), methodNeeded) {
-		fmt.Println("ℹ️ Controller already has:", methodNeeded)
-		return nil
-	}
-
-	f, err := os.OpenFile(controllerFile, os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.WriteString(methodCode); err != nil {
-		return err
-	}
-
-	fmt.Println("✅ Added method to controller:", methodNeeded)
 	return nil
 }
 
@@ -658,6 +676,130 @@ func init() {
 }`
 		filename := "migrations/000003_create_refresh_tokens.go"
 		return os.WriteFile(filename, []byte(content), 0644)
+	}
+
+	return nil
+}
+
+func createOauthClientCommand() {
+	// Create commands/create_oauth_client.go if missing
+	oauthCmdPath := "commands/create_oauth_client.go"
+	if _, err := os.Stat(oauthCmdPath); os.IsNotExist(err) {
+		oauthContent := `package commands
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"time"
+
+	"github.com/ronygcgarcia/go_base_project/config"
+	"github.com/ronygcgarcia/go_base_project/models"
+	"golang.org/x/crypto/bcrypt"
+)
+
+func CreateOAuthClientCLI(name string, minutes int) error {
+	clientID, err := generateSecureRandomHex(16)
+	if err != nil {
+		return fmt.Errorf("failed to generate client ID: %w", err)
+	}
+
+	clientSecretRaw, err := generateSecureRandomHex(32)
+	if err != nil {
+		return fmt.Errorf("failed to generate client secret: %w", err)
+	}
+
+	hashedSecret, _ := bcrypt.GenerateFromPassword([]byte(clientSecretRaw), bcrypt.DefaultCost)
+
+	client := models.OAuthClient{
+		ClientID:     clientID,
+		ClientSecret: string(hashedSecret),
+		Name:         name,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		Revoked:      false,
+	}
+
+	if minutes > 0 {
+		exp := time.Now().Add(time.Duration(minutes) * time.Minute)
+		client.ExpireAt = &exp
+	}
+
+	if err := config.DB.Create(&client).Error; err != nil {
+		return fmt.Errorf("failed to save oauth client: %w", err)
+	}
+
+	fmt.Println("✅ OAuth client created successfully")
+	fmt.Println("Client ID:     ", clientID)
+	fmt.Println("Client Secret: ", clientSecretRaw)
+	return nil
+}
+
+func generateSecureRandomHex(length int) (string, error) {
+	bytes := make([]byte, length)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+`
+		if err := os.WriteFile(oauthCmdPath, []byte(oauthContent), 0644); err != nil {
+			fmt.Printf("❌ Error: failed to create CLI file: %v\n", err)
+			return
+		}
+		fmt.Println("✅ Created command:", oauthCmdPath)
+	} else {
+		fmt.Println("ℹ️ CLI file already exists:", oauthCmdPath)
+	}
+
+}
+
+func addCreateOauthClientCommandCli() error {
+	cliPath := "commands/cli.go"
+	cliBytes, err := os.ReadFile(cliPath)
+	if err != nil {
+		return fmt.Errorf("could not read cli.go: %w", err)
+	}
+	cliContent := string(cliBytes)
+
+	// Agregar import "strconv" si no está
+	if !strings.Contains(cliContent, "\"strconv\"") {
+		cliContent = strings.Replace(cliContent, "import (", "import (\n\t\"strconv\"", 1)
+	}
+
+	caseString := `case "create:oauth-client-credentials":`
+
+	if !strings.Contains(cliContent, caseString) {
+		inject := `
+	case "create:oauth-client-credentials":
+		config.ConnectDatabase()
+		var name string
+		var minutes int
+		for _, arg := range os.Args[2:] {
+			if strings.HasPrefix(arg, "--name=") {
+				name = strings.TrimPrefix(arg, "--name=")
+			} else if strings.HasPrefix(arg, "--expires=") {
+				expiresStr := strings.TrimPrefix(arg, "--expires=")
+				minutes, _ = strconv.Atoi(expiresStr)
+			}
+		}
+		if name == "" {
+			fmt.Println("❌ --name parameter is required")
+			os.Exit(1)
+		}
+		if err := CreateOAuthClientCLI(name, minutes); err != nil {
+			fmt.Println("❌ Error creating oauth client:", err)
+			os.Exit(1)
+		}
+		return true`
+
+		newCli := strings.Replace(cliContent, "switch cmd {", "switch cmd {"+inject, 1)
+		if err := os.WriteFile(cliPath, []byte(newCli), 0644); err != nil {
+			return fmt.Errorf("failed to patch cli.go: %w", err)
+		}
+		fmt.Println("✅ Patched cli.go to include oauth-client-credentials command")
+	} else {
+		fmt.Println("ℹ️ CLI command already present in cli.go")
 	}
 
 	return nil

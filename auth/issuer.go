@@ -31,7 +31,7 @@ func loadPrivateKey() (*rsa.PrivateKey, error) {
 	return privateKey, nil
 }
 
-func IssueClientToken(clientID string) (string, error) {
+func IssueClientToken(clientID string, ttl time.Duration) (string, error) {
 	key, err := loadPrivateKey()
 	if err != nil {
 		return "", err
@@ -40,7 +40,7 @@ func IssueClientToken(clientID string) (string, error) {
 	claims := jwt.MapClaims{
 		"sub":   clientID,
 		"iat":   time.Now().Unix(),
-		"exp":   time.Now().Add(time.Hour * 1).Unix(),
+		"exp":   time.Now().Add(ttl).Unix(),
 		"scope": "client",
 	}
 
