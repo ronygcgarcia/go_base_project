@@ -1,8 +1,8 @@
 package migrations
 
 import (
-	"gorm.io/gorm"
 	"github.com/ronygcgarcia/go_base_project/models"
+	"gorm.io/gorm"
 )
 
 type Role struct{}

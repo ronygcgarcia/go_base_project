@@ -1,17 +1,17 @@
 package routes
 
 import (
-    "github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin"
 )
 
 func SetupRouter() *gin.Engine {
-    r := gin.Default()
+	r := gin.Default()
 
-    api := r.Group("/api")
-    {
-        // RegisterAuthRoutes(api.Group("/auth"))
-        RegisterUserRoutes(api.Group("/users"))
-    }
+	api := r.Group("/api")
+	{
+		// RegisterAuthRoutes(api.Group("/auth"))
+		RegisterUserRoutes(api.Group("/users"))
+	}
 
-    return r
+	return r
 }
