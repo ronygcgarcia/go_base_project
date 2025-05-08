@@ -30,11 +30,20 @@ func main() {
 		port = "8080"
 	}
 
+	crtPath := os.Getenv("SSL_CERT_PATH")
+	if crtPath == "" {
+		crtPath = "./certs/server.crt"
+	}
+	keyPath := os.Getenv("SSL_KEY_PATH")
+	if keyPath == "" {
+		keyPath = "./certs/server.key"
+	}
+
 	fmt.Printf("🧭 Environment: %s | Host: %s\n", env, host)
 
 	if env == "production" {
 		fmt.Printf("🔒 Starting production server at https://%s...\n", host)
-		err := r.RunTLS(":443", "./certs/server.crt", "./certs/server.key")
+		err := r.RunTLS(":443", crtPath, keyPath)
 		if err != nil {
 			log.Fatalf("❌ Failed to start HTTPS server: %v", err)
 		}
