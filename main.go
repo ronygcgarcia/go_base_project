@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ronygcgarcia/go_base_project/commands"
+	"github.com/ronygcgarcia/go_base_project/config"
 	"github.com/ronygcgarcia/go_base_project/routes"
 )
 
@@ -17,6 +18,11 @@ func main() {
 	}
 
 	// Run server
+	config.ConnectDatabase()
+	if config.DB == nil {
+		log.Fatal("❌ Failed to initialize DB instance")
+	}
+
 	r := routes.SetupRouter()
 
 	host := os.Getenv("SERVER_HOST")
