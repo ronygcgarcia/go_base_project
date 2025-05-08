@@ -204,8 +204,18 @@ func AuthClientCredentials(c *gin.Context) {
 		return
 	}
 
-	if !client.CheckSecret(body.ClientSecret) || client.Revoked {
-		c.JSON(401, gin.H{"error": "Invalid credentials"})
+	if !client.CheckSecret(body.ClientSecret) {
+		c.JSON(401, gin.H{"error": "Invalid credentials (secret)"})
+		return
+	}
+
+	if client.Revoked {
+		c.JSON(401, gin.H{"error": "Client is revoked"})
+		return
+	}
+
+	if client.ExpireAt != nil && client.ExpireAt.Before(time.Now()) {
+		c.JSON(401, gin.H{"error": "Client has expired"})
 		return
 	}
 
