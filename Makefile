@@ -30,3 +30,7 @@ seeder:
 activate-auth:
 	go run main.go make:activate-auth type=$(type)
 
+oauth-client:
+	go run main.go create:oauth-client-credentials --name="$(name)" --expires=$(expires)
+
+

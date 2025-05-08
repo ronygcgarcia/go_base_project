@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ronygcgarcia/go_base_project/config"
@@ -109,7 +110,27 @@ func HandleCLI() bool {
 		}
 		fmt.Println("✅ Auth flow activated successfully.")
 		return true
-
+	case "create:oauth-client-credentials":
+		config.ConnectDatabase()
+		var name string
+		var minutes int
+		for _, arg := range os.Args[2:] {
+			if strings.HasPrefix(arg, "--name=") {
+				name = strings.TrimPrefix(arg, "--name=")
+			} else if strings.HasPrefix(arg, "--expires=") {
+				expiresStr := strings.TrimPrefix(arg, "--expires=")
+				minutes, _ = strconv.Atoi(expiresStr)
+			}
+		}
+		if name == "" {
+			fmt.Println("❌ --name parameter is required")
+			os.Exit(1)
+		}
+		if err := CreateOAuthClientCLI(name, minutes); err != nil {
+			fmt.Println("❌ Error creating oauth client:", err)
+			os.Exit(1)
+		}
+		return true
 	}
 
 	return false
