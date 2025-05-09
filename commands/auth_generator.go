@@ -225,6 +225,11 @@ func AuthClientCredentials(c *gin.Context) {
 		return
 	}
 
+	config.DB.Model(&models.RefreshToken{}).
+		Where("client_id = ? AND revoked = ?", client.ID, false).
+		Update("revoked", true)
+
+	// Then create the new token
 	refreshToken := uuid.New().String()
 	hashed, _ := bcrypt.GenerateFromPassword([]byte(refreshToken), bcrypt.DefaultCost)
 
