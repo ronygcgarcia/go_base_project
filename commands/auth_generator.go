@@ -81,10 +81,6 @@ func ActivateAuthFlow(flow string) error {
 	if err := generateAuthModel(flow); err != nil {
 		return fmt.Errorf("failed to create model: %w", err)
 	}
-
-	if err := addCreateOauthClientCommandCli(); err != nil {
-		return fmt.Errorf("failed to add CLI command: %w", err)
-	}
 	fmt.Println("✅ Auth flow setup completed successfully.")
 
 	return nil
@@ -116,6 +112,7 @@ import (
 func RegisterClientPasswordAuth(r *gin.Engine) {
 	authGroup := r.Group("/auth")
 	authGroup.POST("/login", controllers.LoginUser)
+	authGroup.POST("/refresh", controllers.RefreshUserAccessToken)
 }`
 }
 
@@ -174,13 +171,96 @@ func LoginUser(c *gin.Context) {
 		return
 	}
 
-	token, err := auth.IssueUserToken(user.ID)
+	accessToken, err := auth.IssueUserToken(user.ID)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Token generation failed"})
 		return
 	}
 
-	c.JSON(200, gin.H{"access_token": token, "token_type": "Bearer"})
+	// Revoke old refresh tokens
+	config.DB.Model(&models.UserRefreshToken{}).
+		Where("user_id = ? AND revoked = ?", user.ID, false).
+		Update("revoked", true)
+
+	// Generate new refresh token
+	refreshToken := uuid.New().String()
+	hashed, _ := bcrypt.GenerateFromPassword([]byte(refreshToken), bcrypt.DefaultCost)
+
+	rt := models.UserRefreshToken{
+		UserID:    user.ID,
+		Token:     string(hashed),
+		ExpiresAt: time.Now().Add(getRefreshTTL()),
+	}
+	config.DB.Create(&rt)
+
+	c.JSON(200, gin.H{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"token_type":    "Bearer",
+		"expires_in":    int(getAccessTokenTTL().Seconds()),
+	})
+}
+
+func RefreshUserAccessToken(c *gin.Context) {
+	var body struct {
+		RefreshToken string ` + "`json:\"refresh_token\"`" + `
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid payload"})
+		return
+	}
+
+	var tokens []models.UserRefreshToken
+	if err := config.DB.Where("revoked = ?", false).Find(&tokens).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Failed to query tokens"})
+		return
+	}
+
+	var matched *models.UserRefreshToken
+	for _, t := range tokens {
+		if bcrypt.CompareHashAndPassword([]byte(t.Token), []byte(body.RefreshToken)) == nil &&
+			t.ExpiresAt.After(time.Now()) {
+			matched = &t
+			break
+		}
+	}
+
+	if matched == nil {
+		c.JSON(401, gin.H{"error": "Refresh token invalid or expired"})
+		return
+	}
+
+	matched.Revoked = true
+	config.DB.Save(matched)
+
+	var user models.User
+	if err := config.DB.First(&user, matched.UserID).Error; err != nil {
+		c.JSON(401, gin.H{"error": "User not found"})
+		return
+	}
+
+	newAccessToken, err := auth.IssueUserToken(user.ID)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to generate new token"})
+		return
+	}
+
+	newRefresh := uuid.New().String()
+	hashed, _ := bcrypt.GenerateFromPassword([]byte(newRefresh), bcrypt.DefaultCost)
+
+	newRT := models.UserRefreshToken{
+		UserID:    user.ID,
+		Token:     string(hashed),
+		ExpiresAt: time.Now().Add(getRefreshTTL()),
+	}
+	config.DB.Create(&newRT)
+
+	c.JSON(200, gin.H{
+		"access_token":  newAccessToken,
+		"refresh_token": newRefresh,
+		"token_type":    "Bearer",
+		"expires_in":    int(getAccessTokenTTL().Seconds()),
+	})
 }`
 
 	case "client_credentials":
@@ -373,29 +453,48 @@ func generateAuthModel(flow string) error {
 				!strings.Contains(string(source), "Password") ||
 				!strings.Contains(string(source), "Name") ||
 				!strings.Contains(string(source), "CreatedAt") ||
-				!strings.Contains(string(source), "UpdatedAt") {
+				!strings.Contains(string(source), "UpdatedAt") ||
+				!strings.Contains(string(source), "UserRefreshToken") {
 
 				appendContent := `
+	
+	// Ensure full User model compliance for auth
+	import "time"
+	
+	type User struct {
+		ID        uint      ` + "`gorm:\"primaryKey\"`" + `
+		Name      string
+		Email     string    ` + "`gorm:\"uniqueIndex\"`" + `
+		Password  string
+		CreatedAt time.Time
+		UpdatedAt time.Time
+		ExpireAt  *time.Time
+		Revoked   bool       ` + "`gorm:\"default:false\"`" + `
+		RefreshTokens []UserRefreshToken ` + "`gorm:\"foreignKey:UserID\"`" + `
+	}
+	
+	func (User) TableName() string {
+		return "users"
+	}
+	
+	func (u *User) CheckPassword(password string) bool {
+		return bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)) == nil
+	}
+	
+	type UserRefreshToken struct {
+		ID        uint      ` + "`gorm:\"primaryKey\"`" + `
+		UserID    uint      ` + "`gorm:\"index\"`" + `
+		Token     string    ` + "`gorm:\"uniqueIndex\"`" + `
+		ExpiresAt time.Time
+		Revoked   bool      ` + "`gorm:\"default:false\"`" + `
+		CreatedAt time.Time
+		UpdatedAt time.Time
+	}
+	
+	func (UserRefreshToken) TableName() string {
+		return "user_refresh_tokens"
+	}`
 
-// Ensure full User model compliance for auth
-import "time"
-
-type User struct {
-	ID        uint      ` + "`gorm:\"primaryKey\"`" + `
-	Name      string
-	Email     string    ` + "`gorm:\"uniqueIndex\"`" + `
-	Password  string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-func (User) TableName() string {
-	return "users"
-}
-
-func (u *User) CheckPassword(password string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)) == nil
-}`
 				f, err := os.OpenFile(modelFile, os.O_APPEND|os.O_WRONLY, 0600)
 				if err != nil {
 					return err
@@ -404,37 +503,55 @@ func (u *User) CheckPassword(password string) bool {
 				if _, err = f.WriteString(appendContent); err != nil {
 					return err
 				}
-				fmt.Println("✅ Added CheckPassword method and fields to:", modelFile)
+				fmt.Println("✅ Added CheckPassword + RefreshToken model to:", modelFile)
 			} else {
 				fmt.Println("ℹ️ Model already has required fields:", modelFile)
 			}
 			return nil
 		}
+
 		modelContent = `package models
+	
+	import (
+		"golang.org/x/crypto/bcrypt"
+		"time"
+	)
+	
+	type User struct {
+		ID        uint      ` + "`gorm:\"primaryKey\"`" + `
+		Name      string
+		Email     string    ` + "`gorm:\"uniqueIndex\"`" + `
+		Password  string
+		CreatedAt time.Time
+		UpdatedAt time.Time
+		ExpireAt  *time.Time
+		Revoked   bool       ` + "`gorm:\"default:false\"`" + `
+		RefreshTokens []UserRefreshToken ` + "`gorm:\"foreignKey:UserID\"`" + `
+	}
+	
+	func (User) TableName() string {
+		return "users"
+	}
+	
+	func (u *User) CheckPassword(password string) bool {
+		return bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)) == nil
+	}
+	
+	type UserRefreshToken struct {
+		ID        uint      ` + "`gorm:\"primaryKey\"`" + `
+		UserID    uint      ` + "`gorm:\"index\"`" + `
+		Token     string    ` + "`gorm:\"uniqueIndex\"`" + `
+		ExpiresAt time.Time
+		Revoked   bool      ` + "`gorm:\"default:false\"`" + `
+		CreatedAt time.Time
+		UpdatedAt time.Time
+	}
+	
+	func (UserRefreshToken) TableName() string {
+		return "user_refresh_tokens"
+	}`
 
-import (
-	"golang.org/x/crypto/bcrypt"
-	"time"
-)
-
-type User struct {
-	ID        uint      ` + "`gorm:\"primaryKey\"`" + `
-	Name      string
-	Email     string    ` + "`gorm:\"uniqueIndex\"`" + `
-	Password  string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	ExpireAt  *time.Time
-	Revoked   bool       ` + "`gorm:\"default:false\"`" + `
-}
-
-func (User) TableName() string {
-	return "users"
-}
-
-func (u *User) CheckPassword(password string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)) == nil
-}`
+		return os.WriteFile(modelFile, []byte(modelContent), 0644)
 
 	case "client_credentials":
 		modelFile = "models/oauth_client.go"
@@ -549,49 +666,104 @@ func createAuthMigration(flow string) error {
 		migrationName = "create_users_for_auth"
 		if _, err := os.Stat("migrations/000001_" + migrationName + ".go"); err == nil {
 			fmt.Println("ℹ️ Migration already exists:", migrationName)
-			return nil
+		} else {
+			content = `package migrations
+	
+	import (
+		"time"
+		"gorm.io/gorm"
+	)
+	
+	type authUserModel struct {
+		ID        uint      ` + "`gorm:\"primaryKey\"`" + `
+		Name      string
+		Email     string     ` + "`gorm:\"uniqueIndex\"`" + `
+		Password  string
+		CreatedAt time.Time
+		UpdatedAt time.Time
+		ExpireAt  *time.Time
+		Revoked   bool       ` + "`gorm:\"default:false\"`" + `
+	}
+	
+	func (authUserModel) TableName() string {
+		return "users"
+	}
+	
+	type CreateUsersForAuth struct{}
+	
+	func (m CreateUsersForAuth) Name() string {
+		return "000001_create_users_for_auth"
+	}
+	
+	func (m CreateUsersForAuth) Up(db *gorm.DB) error {
+		return db.AutoMigrate(&authUserModel{})
+	}
+	
+	func (m CreateUsersForAuth) Down(db *gorm.DB) error {
+		return db.Migrator().DropTable("users")
+	}
+	
+	func init() {
+		Register(CreateUsersForAuth{})
+	}`
+			filename := "migrations/000001_create_users_for_auth.go"
+			if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
+				return err
+			}
+			fmt.Println("✅ Created migration:", filename)
 		}
-		content = `package migrations
 
-import (
-	"time"
-	"gorm.io/gorm"
-)
+		// ✅ NUEVA MIGRACIÓN: user_refresh_tokens
+		migrationName = "create_refresh_tokens_user"
+		if _, err := os.Stat("migrations/000004_" + migrationName + ".go"); err == nil {
+			fmt.Println("ℹ️ Migration already exists:", migrationName)
+		} else {
+			content = `package migrations
+	
+	import (
+		"time"
+		"gorm.io/gorm"
+	)
+	
+	type userRefreshTokenModel struct {
+		ID        uint      ` + "`gorm:\"primaryKey\"`" + `
+		UserID    uint      ` + "`gorm:\"index\"`" + `
+		Token     string    ` + "`gorm:\"uniqueIndex\"`" + `
+		ExpiresAt time.Time
+		Revoked   bool      ` + "`gorm:\"default:false\"`" + `
+		CreatedAt time.Time
+		UpdatedAt time.Time
+	}
+	
+	func (userRefreshTokenModel) TableName() string {
+		return "user_refresh_tokens"
+	}
+	
+	type CreateRefreshTokensUser struct{}
+	
+	func (m CreateRefreshTokensUser) Name() string {
+		return "000004_create_refresh_tokens_user"
+	}
+	
+	func (m CreateRefreshTokensUser) Up(db *gorm.DB) error {
+		return db.AutoMigrate(&userRefreshTokenModel{})
+	}
+	
+	func (m CreateRefreshTokensUser) Down(db *gorm.DB) error {
+		return db.Migrator().DropTable("user_refresh_tokens")
+	}
+	
+	func init() {
+		Register(CreateRefreshTokensUser{})
+	}`
+			filename := "migrations/000004_create_refresh_tokens_user.go"
+			if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
+				return err
+			}
+			fmt.Println("✅ Created migration:", filename)
+		}
 
-type authUserModel struct {
-	ID        uint      ` + "`gorm:\"primaryKey\"`" + `
-	Name      string
-	Email     string     ` + "`gorm:\"uniqueIndex\"`" + `
-	Password  string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	ExpireAt  *time.Time
-	Revoked   bool       ` + "`gorm:\"default:false\"`" + `
-}
-
-func (authUserModel) TableName() string {
-	return "users"
-}
-
-type CreateUsersForAuth struct{}
-
-func (m CreateUsersForAuth) Name() string {
-	return "000001_create_users_for_auth"
-}
-
-func (m CreateUsersForAuth) Up(db *gorm.DB) error {
-	return db.AutoMigrate(&authUserModel{})
-}
-
-func (m CreateUsersForAuth) Down(db *gorm.DB) error {
-	return db.Migrator().DropTable("users")
-}
-
-func init() {
-	Register(CreateUsersForAuth{})
-}`
-		filename := "migrations/000001_create_users_for_auth.go"
-		return os.WriteFile(filename, []byte(content), 0644)
+		return nil
 
 	case "client_credentials":
 		// oauth_clients migration
